@@ -287,7 +287,7 @@ emitRegularMap (memmap * map, bool addPublics, bool arFlag)
           char *equ = "=";
 
           /* print extra debug info if required */
-          if (options.debug)
+          if (options.debug && !options.gnuBinutilsAsCompatible)
             {
               emitDebugSym (&map->oBuf, sym);
               dbuf_printf (&map->oBuf, " == 0x%04x\n", SPEC_ADDR (sym->etype));
@@ -318,7 +318,7 @@ emitRegularMap (memmap * map, bool addPublics, bool arFlag)
               dbuf_tprintf (&map->oBuf, "\t!org\n", SPEC_ADDR (sym->etype));
             }
           /* print extra debug info if required */
-          if (options.debug)
+          if (options.debug && !options.gnuBinutilsAsCompatible)
             {
               emitDebugSym (&map->oBuf, sym);
               dbuf_printf (&map->oBuf, "==.\n");
@@ -1461,7 +1461,7 @@ emitStaticSeg (memmap *map, struct dbuf_s *oBuf)
       /* if it has an absolute address and no initializer */
       if (SPEC_ABSA (sym->etype) && !sym->ival)
         {
-          if (options.debug)
+          if (options.debug && !options.gnuBinutilsAsCompatible)
             {
               emitDebugSym (oBuf, sym);
               dbuf_printf (oBuf, " == 0x%04x\n", SPEC_ADDR (sym->etype));
@@ -1483,7 +1483,7 @@ emitStaticSeg (memmap *map, struct dbuf_s *oBuf)
                 {
                   dbuf_tprintf (oBuf, "\t!org\n", SPEC_ADDR (sym->etype));
                 }
-              if (options.debug)
+              if (options.debug && !options.gnuBinutilsAsCompatible)
                 {
                   emitDebugSym (oBuf, sym);
                   dbuf_printf (oBuf, " == .\n");
@@ -1504,7 +1504,7 @@ emitStaticSeg (memmap *map, struct dbuf_s *oBuf)
           else
             {
               /* allocate space */
-              if (options.debug)
+              if (options.debug && !options.gnuBinutilsAsCompatible)
                 {
                   emitDebugSym (oBuf, sym);
                   dbuf_printf (oBuf, " == .\n");
@@ -1725,7 +1725,7 @@ emitOverlay (struct dbuf_s *aBuf)
             continue;
 
           /* print extra debug info if required */
-          if (options.debug)
+          if (options.debug && !options.gnuBinutilsAsCompatible)
             {
               emitDebugSym (aBuf, sym);
             }
@@ -1734,7 +1734,7 @@ emitOverlay (struct dbuf_s *aBuf)
              an equate for this no need to allocate space */
           if (SPEC_ABSA (sym->etype))
             {
-              if (options.debug)
+              if (options.debug && !options.gnuBinutilsAsCompatible)
                 dbuf_printf (aBuf, " == 0x%04x\n", SPEC_ADDR (sym->etype));
 
               dbuf_printf (aBuf, "%s\t=\t0x%04x\n", sym->rname, SPEC_ADDR (sym->etype));
@@ -1747,7 +1747,7 @@ emitOverlay (struct dbuf_s *aBuf)
                 {
                   werrorfl (sym->fileDef, sym->lineDef, E_UNKNOWN_SIZE);
                 }
-              if (options.debug)
+              if (options.debug && !options.gnuBinutilsAsCompatible)
                 dbuf_printf (aBuf, "==.\n");
 
               /* allocate space */
@@ -1777,7 +1777,7 @@ glue (void)
   mcs51_like = (port->general.glue_up_main && (TARGET_IS_MCS51 || TARGET_IS_DS390 || TARGET_IS_XA51 || TARGET_IS_DS400));
 
   /* print the global struct definitions */
-  if (options.debug)
+  if (options.debug && !options.gnuBinutilsAsCompatible)
     cdbStructBlock (0);
 
   /* PENDING: this isn't the best place but it will do */
@@ -1828,7 +1828,8 @@ glue (void)
     fprintf (asmFile, "\t.r3k\n");
 
   /* print module name */
-  tfprintf (asmFile, "\t!module\n", moduleName);
+  tfprintf (asmFile, "\t!module\n", options.gnuBinutilsAsCompatible ? fullSrcFileName : moduleName);
+
   if (mcs51_like)
     {
       if(!options.noOptsdccInAsm)
@@ -2082,10 +2083,17 @@ glue (void)
    * the post_static_name area will immediately follow the static_name
    * area.
    */
-  tfprintf (asmFile, "\t!area\n", port->mem.home_name);
-  tfprintf (asmFile, "\t!area\n", port->mem.static_name);       /* MOF */
-  tfprintf (asmFile, "\t!area\n", port->mem.post_static_name);
-  tfprintf (asmFile, "\t!area\n", port->mem.static_name);
+  if (options.gnuBinutilsAsCompatible)
+  {
+    fprintf (asmFile, "\t.section .text\n");
+  }
+  else
+  {
+    tfprintf (asmFile, "\t!area\n", port->mem.home_name);
+    tfprintf (asmFile, "\t!area\n", port->mem.static_name);       /* MOF */
+    tfprintf (asmFile, "\t!area\n", port->mem.post_static_name);
+    tfprintf (asmFile, "\t!area\n", port->mem.static_name);
+  }
 
   if (mainf && IFFUNC_HASBODY (mainf->type))
     {

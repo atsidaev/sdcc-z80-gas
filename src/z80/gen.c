@@ -262,6 +262,9 @@ static asmop *asmopregs[] = { &asmop_c, &asmop_b, &asmop_e, &asmop_d, &asmop_l, 
 
 static asmop **_fReturn3;
 
+static int base_line_no = -1;
+static int previous_ln_no = -1;
+
 void
 z80_init_asmops (void)
 {
@@ -848,11 +851,16 @@ emit3_o (enum asminst inst, asmop * op1, int offset1, asmop * op2, int offset2)
     emit2 ("%s", asminstnames[inst]);
   else if (!op2)
     emit2 ("%s %s", asminstnames[inst], aopGet (op1, offset1, FALSE));
-  else
+  else   
     {
       char *l = Safe_strdup (aopGet (op1, offset1, FALSE));
       //emit2("%s %s, %s", asminstnames[inst], aopGet(op1, offset1, FALSE), aopGet(op2, offset2, FALSE));
-      emit2 ("%s %s, %s", asminstnames[inst], l, aopGet (op2, offset2, FALSE));
+      
+      if (options.gnuBinutilsAsCompatible && (inst == A_SUB || inst == A_XOR || inst == A_OR || inst == A_AND || inst == A_CP) && op1 == ASMOP_A)
+        emit2 ("%s %s", asminstnames[inst], aopGet (op2, offset2, FALSE));
+      else
+        emit2 ("%s %s, %s", asminstnames[inst], l, aopGet (op2, offset2, FALSE));
+
       Safe_free (l);
     }
 
@@ -3161,7 +3169,10 @@ genNot (const iCode * ic)
   else if (IS_BOOL (operandType (left)))
     {
       cheapMove (ASMOP_A, 0, AOP (left), 0);
-      emit2 ("xor a, !immedbyte", 0x01);
+      if (options.gnuBinutilsAsCompatible)
+		emit2 ("xor !immedbyte", 0x01);
+	  else
+	    emit2 ("xor a, !immedbyte", 0x01);
       regalloc_dry_run_cost += 2;
       cheapMove (AOP (result), 0, ASMOP_A, 0);
       goto release;
@@ -3173,7 +3184,10 @@ genNot (const iCode * ic)
      If A == 0, !A = 1
      else A = 0
      So if A = 0, A-1 = 0xFF and C is set, rotate C into reg. */
-  emit2 ("sub a,!one");
+  if (options.gnuBinutilsAsCompatible)
+    emit2 ("sub !one");
+  else
+    emit2 ("sub a,!one");
   regalloc_dry_run_cost += 2;
   outBitC (result);
 
@@ -3294,7 +3308,10 @@ genUminusFloat (operand * op, operand * result)
 
   cheapMove (ASMOP_A, 0, AOP (op), MSB32);
 
-  emit2 ("xor a,!immedbyte", 0x80);
+  if (options.gnuBinutilsAsCompatible)
+    emit2 ("xor !immedbyte", 0x80);
+  else
+    emit2 ("xor a,!immedbyte", 0x80);
   regalloc_dry_run_cost += 2;
   cheapMove (AOP (result), MSB32, ASMOP_A, 0);
 
@@ -4271,10 +4288,32 @@ genFunction (const iCode * ic)
       dbuf_detach (&dbuf);
       if (!regalloc_dry_run)
         genLine.lineCurr->isLabel = 1;
+        
+      if (options.debug && options.gnuBinutilsAsCompatible)
+      {
+        emit2 (".def %s", sym->rname);
+        emit2 (".val %s", sym->rname);
+        emit2 (".scl 2");
+        emit2 (".type 044");
+        emit2 (".endef");
+        emit2 (".global %s", sym->rname);
+      }
+        
     }
   emit2 ("!functionlabeldef", sym->rname);
   if (!regalloc_dry_run)
     genLine.lineCurr->isLabel = 1;
+
+  if (options.debug && options.gnuBinutilsAsCompatible)
+  {
+    emit2(".def .bf");
+    emit2(".val .");
+    emit2(".scl 101");
+    emit2(".line %d", ic->lineno);
+    emit2(".endef");
+    base_line_no = ic->lineno;
+    previous_ln_no = -1;
+  }
 
   ftype = operandType (IC_LEFT (ic));
 
@@ -4454,6 +4493,24 @@ genFunction (const iCode * ic)
   _G.stack.offset = sym->stack;
 }
 
+static void
+genEndFunctionCoffDebug (symbol * sym, iCode * ic)
+{
+  emit2(".def .ef");
+  emit2(".val .");
+  emit2(".scl 101");
+  emit2(".line %d", ic->lineno);
+  emit2(".endef");
+
+  emit2(".def %s", sym->rname);
+  emit2(".val .");
+  emit2(".scl -1");
+  emit2(".endef");
+
+  base_line_no = -1;
+  previous_ln_no = -1;
+}
+
 /*-----------------------------------------------------------------*/
 /* genEndFunction - generates epilogue for functions               */
 /*-----------------------------------------------------------------*/
@@ -4477,6 +4534,11 @@ genEndFunction (iCode * ic)
           emit2 ("!labeldef", dbuf_c_str (&dbuf));
           dbuf_destroy (&dbuf);
           genLine.lineCurr->isLabel = 1;
+          
+          if (options.debug && options.gnuBinutilsAsCompatible)
+          {
+            genEndFunctionCoffDebug(sym, ic);
+          }
         }
       return;
     }
@@ -4610,6 +4672,11 @@ genEndFunction (iCode * ic)
       emit2 ("!labeldef", dbuf_c_str (&dbuf));
       dbuf_destroy (&dbuf);
       genLine.lineCurr->isLabel = 1;
+      
+      if (options.debug && options.gnuBinutilsAsCompatible)
+      {
+        genEndFunctionCoffDebug(sym, ic);
+      }
     }
 
   _G.flushStatics = 1;
@@ -5710,7 +5777,12 @@ genMinus (const iCode * ic)
               if (!regalloc_dry_run)
                 {
                   emit2 ("ld a,%s", _pairs[left].l);
-                  emit2 ("sub a,%s", _pairs[right].l);
+                  
+                  if (options.gnuBinutilsAsCompatible)
+                    emit2 ("sub %s", _pairs[right].l);
+                  else
+                    emit2 ("sub a,%s", _pairs[right].l);
+                  
                   emit2 ("ld e,a");
                   emit2 ("ld a,%s", _pairs[left].h);
                   emit2 ("sbc a,%s", _pairs[right].h);
@@ -6552,10 +6624,18 @@ genCmp (operand * left, operand * right, operand * result, iCode * ifx, int sign
               cheapMove (ASMOP_A, 0, AOP (left), offset);
               if (size == 1)
                 {
-                  emit2 ("xor a, !immedbyte", 0x80);
+                  if (options.gnuBinutilsAsCompatible)
+                    emit2 ("xor !immedbyte", 0x80);
+                  else
+                    emit2 ("xor a, !immedbyte", 0x80);
                   regalloc_dry_run_cost += 2;
                 }
-              emit2 ("sub a, !immedbyte", ((lit >> (offset * 8)) & 0xff) ^ (size == 1 ? 0x80 : 0x00));
+                
+              if (options.gnuBinutilsAsCompatible)
+                emit2 ("sub !immedbyte", ((lit >> (offset * 8)) & 0xff) ^ (size == 1 ? 0x80 : 0x00));
+              else
+                emit2 ("sub a, !immedbyte", ((lit >> (offset * 8)) & 0xff) ^ (size == 1 ? 0x80 : 0x00));
+                
               regalloc_dry_run_cost += 2;
               size--;
               offset++;
@@ -6637,7 +6717,10 @@ fix:
                 {
                   symbol *tlbl = newiTempLabel (NULL);
                   emit2 ("jp PO, !tlabel", labelKey2num (tlbl->key));
-                  emit2 ("xor a, !immedbyte", 0x80);
+                  if (options.gnuBinutilsAsCompatible)
+                    emit2 ("xor !immedbyte", 0x80);
+                  else
+                    emit2 ("xor a, !immedbyte", 0x80);
                   emitLabelSpill (tlbl);
                 }
               regalloc_dry_run_cost += 5;
@@ -6657,7 +6740,12 @@ fix:
                   emit2 ("jp Z, !tlabel", labelKey2num (tlbl1->key));
                   emit2 ("bit 7, d");
                   emit2 ("jp NZ, !tlabel", labelKey2num (tlbl2->key));
-                  emit2 ("cp a, a");
+                  
+                  if (options.gnuBinutilsAsCompatible)
+                    emit2 ("cp a");
+                  else
+                    emit2 ("cp a, a");
+                    
                   emit2 ("jp !tlabel", labelKey2num (tlbl2->key));
                   emitLabelSpill (tlbl1);
                   emit2 ("bit 7, d");
@@ -6925,7 +7013,12 @@ gencjneshort (operand * left, operand * right, symbol * lbl, const iCode *ic)
           else
             regalloc_dry_run_cost += ld_cost (ASMOP_E, AOP (left));
           cheapMove (ASMOP_A, 0, AOP (right), offset);
-          emit2 ("sub a,%s", _pairs[pair].l);
+          
+          if (options.gnuBinutilsAsCompatible)
+            emit2 ("sub %s", _pairs[pair].l);
+          else
+            emit2 ("sub a,%s", _pairs[pair].l);
+          
           regalloc_dry_run_cost += 1;
           if (!regalloc_dry_run)
             emit2 ("jp NZ,!tlabel", labelKey2num (lbl->key));
@@ -6954,7 +7047,10 @@ gencjne (operand * left, operand * right, symbol * lbl, const iCode *ic)
       emit2 ("ld a,!one");
       emit2 ("jp !tlabel", labelKey2num (tlbl->key));
       emitLabelSpill (lbl);
-      emit2 ("xor a,a");
+      if (options.gnuBinutilsAsCompatible)
+        emit2 ("xor a");
+      else
+        emit2 ("xor a,a");
       emitLabel (tlbl);
     }
   regalloc_dry_run_cost += 6;
@@ -7936,7 +8032,10 @@ genGetHbit (const iCode * ic)
   else
     {
       emit3 (A_RLC, ASMOP_A, 0);
-      emit2 ("and a,!one");
+      if (options.gnuBinutilsAsCompatible)
+        emit2 ("and !one");
+      else
+        emit2 ("and a,!one");
       regalloc_dry_run_cost += 2;
       outAcc (result);
     }
@@ -8259,7 +8358,10 @@ AccLsh (int shCount)
           /* rotate left accumulator */
           AccRol (shCount);
           /* and kill the lower order bits */
-          emit2 ("and a,!immedbyte", SLMask[shCount]);
+          if (options.gnuBinutilsAsCompatible)
+            emit2 ("and !immedbyte", SLMask[shCount]);
+          else
+            emit2 ("and a,!immedbyte", SLMask[shCount]);
           regalloc_dry_run_cost += 2;
         }
     }
@@ -8532,7 +8634,12 @@ AccRsh (int shCount)
       AccRol (8 - shCount);
       /* and kill the higher order bits */
       if (!regalloc_dry_run)
-        emit2 ("and a,!immedbyte", 0xff >> shCount);
+      {
+        if (options.gnuBinutilsAsCompatible)
+          emit2 ("and !immedbyte", 0xff >> shCount);
+        else
+          emit2 ("and a,!immedbyte", 0xff >> shCount);
+      }
       regalloc_dry_run_cost += 2;
     }
   else if(shCount)
@@ -8866,7 +8973,12 @@ genUnpackBits (operand * result, int pair)
       emit2 ("ld a,!*pair", _pairs[pair].name);
       regalloc_dry_run_cost += (pair == PAIR_IX || pair == PAIR_IY) ? 3 : 1;
       AccRol (8 - bstr);
-      emit2 ("and a,!immedbyte", ((unsigned char) - 1) >> (8 - blen));
+      
+      if (options.gnuBinutilsAsCompatible)
+        emit2 ("and !immedbyte", ((unsigned char) - 1) >> (8 - blen));
+      else
+        emit2 ("and a,!immedbyte", ((unsigned char) - 1) >> (8 - blen));
+        
       regalloc_dry_run_cost += 2;
       if (!SPEC_USIGN (etype))
         {
@@ -8876,7 +8988,10 @@ genUnpackBits (operand * result, int pair)
               symbol *tlbl = newiTempLabel (NULL);
               emit2 ("bit %d,a", blen - 1);
               emit2 ("jp Z,!tlabel", labelKey2num (tlbl->key));
-              emit2 ("or a,!immedbyte", (unsigned char) (0xff << blen));
+              if (options.gnuBinutilsAsCompatible)
+                emit2 ("or !immedbyte", (unsigned char) (0xff << blen));
+              else
+                emit2 ("or a,!immedbyte", (unsigned char) (0xff << blen));
               emitLabel (tlbl);
             }
           regalloc_dry_run_cost += 7;
@@ -8905,7 +9020,12 @@ genUnpackBits (operand * result, int pair)
           cheapMove (AOP (result), offset++, ASMOP_A, 0);
           emit2 ("ld a,l");
         }
-      emit2 ("and a,!immedbyte", ((unsigned char) - 1) >> (16 - blen));
+        
+      if (options.gnuBinutilsAsCompatible)
+        emit2 ("and !immedbyte", ((unsigned char) - 1) >> (16 - blen));
+      else
+        emit2 ("and a,!immedbyte", ((unsigned char) - 1) >> (16 - blen));
+      
       regalloc_dry_run_cost += 7;
       if (!SPEC_USIGN (etype))
         {
@@ -8915,7 +9035,10 @@ genUnpackBits (operand * result, int pair)
               symbol *tlbl = newiTempLabel (NULL);
               emit2 ("bit %d,a", blen - 1 - 8);
               emit2 ("jp Z,!tlabel", labelKey2num (tlbl->key));
-              emit2 ("or a,!immedbyte", (unsigned char) (0xff << (blen - 8)));
+              if (options.gnuBinutilsAsCompatible)
+                emit2 ("or !immedbyte", (unsigned char) (0xff << (blen - 8)));
+              else
+                emit2 ("or a,!immedbyte", (unsigned char) (0xff << (blen - 8)));
               emitLabel (tlbl);
             }
           regalloc_dry_run_cost += 7;
@@ -8945,7 +9068,12 @@ genUnpackBits (operand * result, int pair)
   if (rlen)
     {
       emit2 ("ld a,!*pair", _pairs[pair].name);
-      emit2 ("and a,!immedbyte", ((unsigned char) - 1) >> (8 - rlen));
+      
+      if (options.gnuBinutilsAsCompatible)
+        emit2 ("and !immedbyte", ((unsigned char) - 1) >> (8 - rlen));
+      else
+        emit2 ("and a,!immedbyte", ((unsigned char) - 1) >> (8 - rlen));
+      
       regalloc_dry_run_cost += 3;
       if (!SPEC_USIGN (etype))
         {
@@ -8955,7 +9083,10 @@ genUnpackBits (operand * result, int pair)
               symbol *tlbl = newiTempLabel (NULL);
               emit2 ("bit %d,a", rlen - 1);
               emit2 ("jp Z,!tlabel", labelKey2num (tlbl->key));
-              emit2 ("or a,!immedbyte", (unsigned char) (0xff << rlen));
+              if (options.gnuBinutilsAsCompatible)
+                emit2 ("or !immedbyte", (unsigned char) (0xff << rlen));
+              else
+                emit2 ("or a,!immedbyte", (unsigned char) (0xff << rlen));
               emitLabel (tlbl);
             }
           regalloc_dry_run_cost += 7;
@@ -9452,12 +9583,18 @@ genPackBits (sym_link * etype, operand * right, int pair, const iCode * ic)
           regalloc_dry_run_cost += (pair == PAIR_IX || pair == PAIR_IY) ? 3 : 1;
           if ((mask | litval) != 0xff)
             {
-              emit2 ("and a,!immedbyte", mask);
+              if (options.gnuBinutilsAsCompatible)
+                emit2 ("and !immedbyte", mask);
+              else
+                emit2 ("and a,!immedbyte", mask);
               regalloc_dry_run_cost += 2;
             }
           if (litval)
             {
-              emit2 ("or a,!immedbyte", litval);
+              if (options.gnuBinutilsAsCompatible)
+                emit2 ("or !immedbyte", litval);
+              else
+                emit2 ("or a,!immedbyte", litval);
               regalloc_dry_run_cost += 1;
             }
           emit2 ("ld !*pair,a", _pairs[pair].name);
@@ -9470,7 +9607,10 @@ genPackBits (sym_link * etype, operand * right, int pair, const iCode * ic)
           cheapMove (ASMOP_A, 0, AOP (right), 0);
           /* shift and mask source value */
           AccLsh (bstr);
-          emit2 ("and a,!immedbyte", (~mask) & 0xff);
+          if (options.gnuBinutilsAsCompatible)
+            emit2 ("and !immedbyte", (~mask) & 0xff);
+          else
+            emit2 ("and a,!immedbyte", (~mask) & 0xff);
           regalloc_dry_run_cost += 2;
 
           extraPair = getFreePairId (ic);
@@ -9494,9 +9634,15 @@ genPackBits (sym_link * etype, operand * right, int pair, const iCode * ic)
           emit2 ("ld a,!*pair", _pairs[pair].name);
           regalloc_dry_run_cost += (pair == PAIR_IX || pair == PAIR_IY) ? 3 : 1;
 
-          emit2 ("and a,!immedbyte", mask);
+          if (options.gnuBinutilsAsCompatible)
+            emit2 ("and !immedbyte", mask);
+          else
+            emit2 ("and a,!immedbyte", mask);
           regalloc_dry_run_cost += 2;
-          emit2 ("or a,%s", _pairs[extraPair].l);
+          if (options.gnuBinutilsAsCompatible)
+            emit2 ("or %s", _pairs[extraPair].l);
+          else
+            emit2 ("or a,%s", _pairs[extraPair].l);
           regalloc_dry_run_cost += 1;
           emit2 ("ld !*pair,a", _pairs[pair].name);
           regalloc_dry_run_cost += (pair == PAIR_IX || pair == PAIR_IY) ? 3 : 1;
@@ -9556,15 +9702,28 @@ genPackBits (sym_link * etype, operand * right, int pair, const iCode * ic)
             }
 
           if ((mask | litval) != 0xff)
-            emit2 ("and a,!immedbyte", mask);
+          {
+			if (options.gnuBinutilsAsCompatible)
+              emit2 ("and !immedbyte", mask);
+            else
+              emit2 ("and a,!immedbyte", mask);
+          }
           if (litval)
-            emit2 ("or a,!immedbyte", litval);
+          {
+			if (options.gnuBinutilsAsCompatible)
+              emit2 ("or !immedbyte", litval);
+            else
+              emit2 ("or a,!immedbyte", litval);
+          }
         }
       else
         {
           /* Case with partial byte and arbitrary source */
           cheapMove (ASMOP_A, 0, AOP (right), offset++);
-          emit2 ("and a,!immedbyte", (~mask) & 0xff);
+          if (options.gnuBinutilsAsCompatible)
+            emit2 ("and !immedbyte", (~mask) & 0xff);
+          else
+            emit2 ("and a,!immedbyte", (~mask) & 0xff);
           regalloc_dry_run_cost += 2;
 
           extraPair = getFreePairId (ic);
@@ -9598,9 +9757,15 @@ genPackBits (sym_link * etype, operand * right, int pair, const iCode * ic)
               regalloc_dry_run_cost += 1;
             }
 
-          emit2 ("and a,!immedbyte", mask);
+          if (options.gnuBinutilsAsCompatible)
+            emit2 ("and !immedbyte", mask);
+          else
+            emit2 ("and a,!immedbyte", mask);
           regalloc_dry_run_cost += 2;
-          emit2 ("or a,%s", _pairs[extraPair].l);
+          if (options.gnuBinutilsAsCompatible)
+            emit2 ("or %s", _pairs[extraPair].l);
+          else
+            emit2 ("or a,%s", _pairs[extraPair].l);
           regalloc_dry_run_cost += 1;
           if (needPopExtra)
             _pop (extraPair);
@@ -11279,7 +11444,10 @@ if(nParams != 2) printf("params: %d\n", nParams);
     {
       symbol *tlbl = newiTempLabel (NULL);
       emitLabel (tlbl);
-      emit2 ("cp a, (hl)");
+      if (options.gnuBinutilsAsCompatible)
+        emit2 ("cp (hl)");
+      else
+        emit2 ("cp a, (hl)");
       emit2 ("ldi");
       emit2 ("jr NZ, !tlabel", labelKey2num (tlbl->key));
     }
@@ -11362,7 +11530,12 @@ genBuiltInStrncpy (const iCode *ic, int nparams, operand **pparams)
       symbol *tlbl1 = newiTempLabel (0);
       symbol *tlbl2 = newiTempLabel (0);
       emitLabel (tlbl2);
-      emit2 ("cp a, (hl)");
+      
+      if (options.gnuBinutilsAsCompatible)
+        emit2 ("cp (hl)");
+      else
+        emit2 ("cp a, (hl)");
+        
       emit2 ("ldi");
       emit2 ("jp PE, !tlabel", labelKey2num (tlbl1->key));
       emit2 ("jr NZ, !tlabel", labelKey2num (tlbl2->key));
@@ -11455,7 +11628,10 @@ genBuiltInStrchr (const iCode *ic, int nParams, operand **pparams)
   emit3 (A_CP, ASMOP_A, aop_c);
   if (!regalloc_dry_run)
     emit2 ("jp Z, !tlabel", labelKey2num (tlbl1->key));
-  emit2 ("or a, a");
+  if (options.gnuBinutilsAsCompatible)
+    emit2 ("or a");
+  else
+    emit2 ("or a, a");
   emit2 ("inc %s", _pairs[pair].name);
   if (!regalloc_dry_run)
     emit2 ("jr NZ, !tlabel", labelKey2num (tlbl2->key));
@@ -11899,6 +12075,13 @@ genZ80Code (iCode * lic)
             debugFile->writeCLine (ic);
           if (!options.noCcodeInAsm)
             emit2 (";%s:%d: %s", ic->filename, ic->lineno, printCLine (ic->filename, ic->lineno));
+            
+          if (options.gnuBinutilsAsCompatible && options.debug && base_line_no != -1 && previous_ln_no < (ic->lineno - base_line_no))
+          {
+            emit2 (".ln %d", ic->lineno - base_line_no + 1);
+            previous_ln_no = ic->lineno - base_line_no;
+          }
+            
           cln = ic->lineno;
         }
       if (options.iCodeInAsm)

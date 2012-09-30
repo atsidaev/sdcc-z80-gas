@@ -6781,7 +6781,7 @@ skipall:
   addSet (&operKeyReset, name);
   applyToSet (operKeyReset, resetParmKey);
 
-  if (options.debug)
+  if (options.debug && !options.gnuBinutilsAsCompatible)
     cdbStructBlock (1);
 
   cleanUpLevel (LabelTab, 0);

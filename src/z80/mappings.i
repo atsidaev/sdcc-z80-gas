@@ -486,6 +486,49 @@ static const ASM_MAPPING _z80asm_z80_mapping[] = {
     { NULL, NULL }
 };
 
+static const ASM_MAPPING _as_mapping[] = {
+    { "global", "XDEF %s" },
+    { "extern", "XREF %s" },
+    { "slabeldef", "\n%s:" },
+    { "labeldef", "\n%s:" },
+    { "tlabeldef", "\nl%N%05d:" },
+    { "tlabel", "l%N%05d" },
+    { "fileprelude", 
+        "; Generated for use with as from z80-binutils.\n"
+    },
+    { "functionheader", 
+      "; ---------------------------------\n"
+      "; Function %s\n"
+      "; ---------------------------------"
+    },
+    { "functionlabeldef", "%s:" },
+    { "zero", "$00" },
+    { "one", "$01" },
+    { "ascii", ".ascii \"%s\"" },
+    { "ds", "DEFS %d" },
+    { "db", "DEFB" },
+    { "dbs", "DEFB %s" },
+    { "dw", "DEFW" },
+    { "dws", "DEFW %s" },
+    { "immed", "" },
+    { "constbyte", "$%02X" },
+    { "constword", "$%04X" },
+    { "immedword", "$%04X" },
+    { "immedbyte", "$%02X" },
+    { "hashedstr", "%s" },
+    { "lsbimmeds", "%s & $FF" },
+    { "msbimmeds", "%s / 256" },
+
+    { "bankimmeds", "BANK(%s)" },
+    { "module", ".file \"%s\"\n"
+                "\t.align 1" },
+    { "area", "; Area  %s" },
+    { "areadata", ".section .data" },
+    { "areacode", ".section .text" }, 
+    { "areahome", ".section .text" },
+    { NULL, NULL }
+};
+
 static const ASM_MAPPINGS _isas = {
     NULL,
     _isas_mapping
@@ -523,6 +566,16 @@ static const ASM_MAPPINGS _z80asm = {
 
 const ASM_MAPPINGS _z80asm_z80 = {
     &_z80asm,
+    _z80asm_z80_mapping
+};
+
+static const ASM_MAPPINGS _as = {
+    NULL,
+    _as_mapping
+};
+
+const ASM_MAPPINGS _as_z80 = {
+    &_as,
     _z80asm_z80_mapping
 };
 

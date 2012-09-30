@@ -196,6 +196,9 @@ dumpSymInfo(const char *pcName, memmap *memItem)
 void
 emitDebuggerSymbol (const char * debugSym)
 {
+  if (options.gnuBinutilsAsCompatible)
+    return;
+  
   if (port->debugger.emitDebuggerSymbol)
     port->debugger.emitDebuggerSymbol (debugSym);
 }

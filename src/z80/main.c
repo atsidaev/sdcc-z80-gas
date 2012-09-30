@@ -41,6 +41,8 @@
 #define OPTION_OLDRALLOC       "--oldralloc"
 #define OPTION_FRAMEPOINTER    "--fno-omit-frame-pointer"
 
+static const char *_z80gasAsmCmd[];
+
 static char _z80_defaultRules[] = {
 #include "peeph.rul"
 #include "peeph-z80.rul"
@@ -56,12 +58,17 @@ static char _r2k_defaultRules[] = {
 #include "peeph-r2k.rul"
 };
 
+static char _z80_gas_defaultRules[] = {
+#include "peeph.rul"
+#include "peeph-z80-gas.rul"
+};
+
 Z80_OPTS z80_opts;
 
 static OPTION _z80_options[] = {
   {0, OPTION_CALLEE_SAVES_BC, &z80_opts.calleeSavesBC, "Force a called function to always save BC"},
   {0, OPTION_PORTMODE,        NULL, "Determine PORT I/O mode (z80/z180)"},
-  {0, OPTION_ASM,             NULL, "Define assembler name (rgbds/asxxxx/isas/z80asm)"},
+  {0, OPTION_ASM,             NULL, "Define assembler name (rgbds/asxxxx/isas/z80asm/as)"},
   {0, OPTION_CODE_SEG,        &options.code_seg, "<name> use this name for the code segment", CLAT_STRING},
   {0, OPTION_CONST_SEG,       &options.const_seg, "<name> use this name for the const segment", CLAT_STRING},
   {0, OPTION_NO_STD_CRT0,     &options.no_std_crt0, "For the z80/gbz80 do not link default crt0.rel"},
@@ -87,7 +94,8 @@ typedef enum
   ASM_TYPE_ASXXXX,
   ASM_TYPE_RGBDS,
   ASM_TYPE_ISAS,
-  ASM_TYPE_Z80ASM
+  ASM_TYPE_Z80ASM,
+  ASM_TYPE_AS
 }
 ASM_TYPE;
 
@@ -496,6 +504,17 @@ _parseOptions (int *pargc, char **argv, int *i)
               _G.asmType = ASM_TYPE_ISAS;
               return TRUE;
             }
+          else if (!strcmp (asmblr, "as"))
+            {
+              port->assembler.externGlobal = TRUE;
+              asm_addTree (&_as_z80);
+              _G.asmType = ASM_TYPE_AS;
+              options.noOptsdccInAsm = TRUE;
+              options.gnuBinutilsAsCompatible = TRUE;
+              port->peep.default_rules = _z80_gas_defaultRules; /* hack */
+              port->assembler.cmd = _z80gasAsmCmd;
+              return TRUE;
+            }
         }
       else if (!strncmp (argv[*i], OPTION_PORTMODE, sizeof (OPTION_PORTMODE) - 1))
         {
@@ -775,6 +794,10 @@ static const char *_gbAsmCmd[] = {
 
 static const char *_r2kAsmCmd[] = {
   "sdasrab", "$l", "$3", "$2", "$1.asm", NULL
+};
+
+static const char *_z80gasAsmCmd[] = {
+  "z80-sdcc-coff-as", "", "", " -o \"$1.o\"", "\"$1.asm\"", NULL
 };
 
 static const char *const _crt[] = { "crt0.rel", NULL, };
